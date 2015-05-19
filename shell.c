@@ -16,12 +16,6 @@
 #define READLINK_FROM(path,pid,buf,ns,fd,ret,dest,len) sprintf((buf), (path), (pid));\
                                     READLINK(ns,fd,ret,buf,dest,len);
 
-#define SAME_NS(ns1,ns2) ns1->ipc == ns2->ipc && \
-                         ns1->mnt == ns2->mnt && \
-                         ns1->pid == ns2->pid && \
-                         ns1->uts == ns2->uts && \
-                         ns1->net == ns2->net
-
 struct process {
 	int pid;
 	struct process *next_proc;
@@ -42,9 +36,30 @@ enum NAMESPACE_TYPE {
     NS_DEFAULT, NS_CUSTOM
 };
 
+/***
+ * parse symbolic link and get the inode id as corresponding namespace id
+ */ 
 unsigned long getNamespaceId(const char *);
-void printNamespace(const struct namespace*, const enum NAMESPACE_TYPE);
+
+/***
+ * print a container info
+ */
+void printContainer(const struct namespace*, const enum NAMESPACE_TYPE);
+
+/***
+ * print field in a namespace struct
+ */
+void printNamespace(const struct namespace*);
+
+/***
+ * count processes in a namespace
+ */
 int countProcesses(const struct namespace*);
+
+/***
+ * Check if two namespaces are exatly the same
+ */
+int sameNs(const struct namespace *, const struct namespace *);
 
 static int cid = 1;   // container id counter
 
@@ -67,6 +82,7 @@ int main() {
     READLINK(root_namespace, net, ret, "/proc/1/ns/net", buf, 32);
     root_namespace.proc_list = &proc;
     root_namespace.cid       = cid ++;
+    // printNamespace(&root_namespace);
 
     // init number regular expression
     regex_t num_regex;
@@ -92,15 +108,21 @@ int main() {
     		char *dname = dir->d_name;
             if(regexec(&num_regex, dname, 0, NULL, 0) != 0) {
             	// process folder
-                if(strlen(dname) != 1 || dname[0] != '1') {
+                if(!(strlen(dname) == 1 && dname[0] == '1')) {
                     // not init process
                     READLINK_FROM("/proc/%s/ns/ipc",dname,path,*tmp_ns,ipc,ret,buf,32);
                     READLINK_FROM("/proc/%s/ns/mnt",dname,path,*tmp_ns,mnt,ret,buf,32);
                     READLINK_FROM("/proc/%s/ns/pid",dname,path,*tmp_ns,pid,ret,buf,32);
                     READLINK_FROM("/proc/%s/ns/uts",dname,path,*tmp_ns,uts,ret,buf,32);
                     READLINK_FROM("/proc/%s/ns/net",dname,path,*tmp_ns,net,ret,buf,32);
+
                     struct namespace *cmp_ns = &root_namespace;
-                    while(!(SAME_NS(cmp_ns, tmp_ns))) {
+                    printNamespace(cmp_ns);
+                    while((cmp_ns->pid) != (tmp_ns->pid) ||
+                          (cmp_ns->uts) != (tmp_ns->uts) ||
+                          (cmp_ns->net) != (tmp_ns->net) ||
+                          (cmp_ns->ipc) != (tmp_ns->ipc) ||
+                          (cmp_ns->mnt) != (tmp_ns->mnt)) {
                         if(cmp_ns->next_ns == NULL) {
                             // found a new namespace | container candidate
                             struct process proc = {atoi(dname), NULL};
@@ -129,9 +151,9 @@ int main() {
     struct namespace *p = &root_namespace;
     while(p != NULL) {
         if(p == &root_namespace) {
-            printNamespace(p, NS_DEFAULT);
+            printContainer(p, NS_DEFAULT);
         } else {
-            printNamespace(p, NS_CUSTOM);
+            printContainer(p, NS_CUSTOM);
         }
         p = p->next_ns;
     }
@@ -178,7 +200,7 @@ unsigned long getNamespaceId(const char *link) {
 	return atol(buf);
 }
 
-void printNamespace(const struct namespace* ns, const enum NAMESPACE_TYPE type) {
+void printContainer(const struct namespace* ns, const enum NAMESPACE_TYPE type) {
     printf("-------------------------------------\n");
     printf("|   Container ID: %3d             |\n", ns->cid);
     switch(type) {
@@ -206,4 +228,21 @@ int countProcesses(const struct namespace *ns) {
         p = p->next_proc;
     }
     return count;
+}
+
+void printNamespace(const struct namespace *ns) {
+    printf("pid: %ld\n", ns->pid);
+    printf("uts: %ld\n", ns->uts);
+    printf("mnt: %ld\n", ns->mnt);
+    printf("ipc: %ld\n", ns->ipc);
+    printf("net: %ld\n", ns->net);
+}
+
+int sameNs(const struct namespace *ns1, const struct namespace *ns2) {
+    // printNamespace(ns1);
+    // printNamespace(ns2);
+    if(ns1->ipc == ns2->ipc && ns1->pid == ns2->pid &&
+       ns1->uts == ns2->uts && ns1->net == ns2->net &&
+       ns1->mnt == ns2->mnt) return 1;
+    return 0;
 }
