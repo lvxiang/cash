@@ -35,9 +35,18 @@ struct namespace {
     unsigned long net;
     struct namespace *next_ns;
     struct process *proc_list;
+    int cid;
 } root_namespace;
 
-unsigned long getNamespaceId(const char *link);
+enum NAMESPACE_TYPE {
+    NS_DEFAULT, NS_CUSTOM
+};
+
+unsigned long getNamespaceId(const char *);
+void printNamespace(const struct namespace*, const NAMESPACE_TYPE);
+int countProcesses(const struct namespace*);
+
+static int cid = 1;   // container id counter
 
 int main() {
 
@@ -56,6 +65,7 @@ int main() {
     READLINK(root_namespace, uts, ret, "/proc/1/ns/uts", buf, 32);
     READLINK(root_namespace, net, ret, "/proc/1/ns/net", buf, 32);
     root_namespace.proc_list = (struct process *)(&({1, NULL}));
+    root_namespace.cid       = cid ++;
 
     // init number regular expression
     regex_t num_regex;
@@ -92,8 +102,9 @@ int main() {
                     while(!(SAME_NS(cmp_ns, tmp_ns))) {
                         if(cmp_ns->next_ns == NULL) {
                             // found a new namespace | container candidate
-                            cmp_ns->next_ns = tmp_ns;
                             tmp_ns->proc_list = (struct process *)(&({atoi(dname), NULL}));
+                            tmp_ns->cid = cid ++;
+                            cmp_ns->next_ns = tmp_ns;
                             tmp_ns = malloc(sizeof(*tmp_ns));
                         } else {
                             cmp_ns = cmp_ns->next_ns;
@@ -111,13 +122,45 @@ int main() {
     regfree(&num_regex);
 
     // prompt user to choose a container with specific namespace
+    printf("possible containers detected:\n");
     
-    
+    struct namespace *p = &root_namespace;
+    while(p != NULL) {
+        if(p == &root_namespace) {
+            printNamespace(p, NS_DEFAULT);
+        } else {
+            printNamespace(p, NS_CUSTOM);
+        }
+        p = p->next_ns;
+    }
+
+    while(1) {
+        printf("Please choose a container, enter the id\n");
+        scanf("%s", buf);
+        int id = atoi(buf);
+        if(id == 1) {
+            printf("You cannot choose the default container!\n");
+        } else {
+            int found = 0;
+            p = &(root_namespace.next_ns);
+            while(p != NULL) {
+                if(p->cid == id) {
+                    found = 1;
+                    break;
+                }
+                p = p->next_ns;
+            }
+            if(found) {
+                break;
+            }
+        }
+    }
+
     // clone a process and set to the chosen namespace
     
 
     // now do whatever is possible in a shell!
-
+    
     return 0;
 }
 
@@ -131,4 +174,34 @@ unsigned long getNamespaceId(const char *link) {
 	}
 	*p = '\0';
 	return atol(buf);
+}
+
+void printNamespace(const struct namespace* ns, const NAMESPACE_TYPE type) {
+    printf("-------------------------------------\n");
+    printf("|   Container ID: %3d             |\n");
+    switch(type) {
+        case NS_DEFAULT:
+            printf("|   Container Type: DEFAULT     |\n");
+            break;
+        case NS_USER:
+            printf("|   Container Type: CUSTOM      |\n");
+            break;
+    }
+    printf("|   pid ns: %d   |\n", ns->pid);
+    printf("|   mnt ns: %d   |\n", ns->mnt);
+    printf("|   ipc ns: %d   |\n", ns->ipc);
+    printf("|   uts ns: %d   |\n", ns->uts);
+    printf("|   net ns: %d   |\n", ns->net);
+    printf("| num processes: %d |\n", countProcesses(ns));
+    printf("-------------------------------------\n\n");
+}
+
+int countProcesses(const struct namespace *ns) {
+    int count = 0;
+    struct process *p = ns->proc_list;
+    while(p != NULL) {
+        count ++;
+        p = p->next_proc;
+    }
+    return count;
 }
