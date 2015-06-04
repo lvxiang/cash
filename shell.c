@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <regex.h>
 #include <string.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
 
@@ -62,6 +63,7 @@ int countProcesses(const struct namespace*);
 int sameNs(const struct namespace *, const struct namespace *);
 
 /***
+<<<<<<< HEAD
  * List all containers found
  */
 void listContainers(struct namespace *);
@@ -70,6 +72,11 @@ void listContainers(struct namespace *);
  * free mem used by a specific container
  */
 void freeContainer(struct namespace *);
+
+/***
+ * set namespace of the calling thread
+ */
+void setNs(const char *ns, const long pid);
 
 static int cid = 1;   // container id counter
 
@@ -219,7 +226,22 @@ PARSE_CONTAINERS:
     }
 
     // clone a process and set to the chosen namespace
-    
+    pid_t cpid = fork();
+    if(fpid < 0) {
+    	printf("error creating shell process");
+    } else if(fpid == 0) {
+        // in child process
+ 	setNs("ipc", p->proc_list->pid);
+	setNs("mnt", p->proc_list->pid);
+	setNs("pid", p->proc_list->pid);
+	setNs("net", p->proc_list->pid);
+	setNs("uts", p->proc_list->pid);
+	
+        // TODO start shell and play with some commands
+			
+    } else {
+        // in parent process
+    }
 
     // now do whatever is possible in a shell!
     
@@ -305,4 +327,13 @@ void freeContainer(struct namespace *ns) {
         free(pr);
     }
     free(ns);
+}
+
+void setNs(const char *ns, const long pid) {
+    char path[32];
+    sprintf(path, "/proc/%ld/ns/%s", pid, ns);
+    int fd = open(path, O_RDONLY);
+    setns(fd, 0);
+    close(fd);
+    free(path);
 }
