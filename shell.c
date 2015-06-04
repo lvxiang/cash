@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <regex.h>
 #include <string.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
 
@@ -60,6 +61,11 @@ int countProcesses(const struct namespace*);
  * Check if two namespaces are exatly the same
  */
 int sameNs(const struct namespace *, const struct namespace *);
+
+/***
+ * set namespace of the calling thread
+ */
+void setNs(const char *ns, const long pid);
 
 static int cid = 1;   // container id counter
 
@@ -181,7 +187,22 @@ int main() {
     }
 
     // clone a process and set to the chosen namespace
-    
+    pid_t cpid = fork();
+    if(fpid < 0) {
+    	printf("error creating shell process");
+    } else if(fpid == 0) {
+        // in child process
+ 	setNs("ipc", p->proc_list->pid);
+	setNs("mnt", p->proc_list->pid);
+	setNs("pid", p->proc_list->pid);
+	setNs("net", p->proc_list->pid);
+	setNs("uts", p->proc_list->pid);
+	
+        // TODO start shell and play with some commands
+			
+    } else {
+        // in parent process
+    }
 
     // now do whatever is possible in a shell!
     
@@ -245,4 +266,13 @@ int sameNs(const struct namespace *ns1, const struct namespace *ns2) {
        ns1->uts == ns2->uts && ns1->net == ns2->net &&
        ns1->mnt == ns2->mnt) return 1;
     return 0;
+}
+
+void setNs(const char *ns, const long pid) {
+    char path[32];
+    sprintf(path, "/proc/%ld/ns/%s", pid, ns);
+    int fd = open(path, O_RDONLY);
+    setns(fd, 0);
+    close(fd);
+    free(path);
 }
