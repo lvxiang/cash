@@ -8,11 +8,12 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/time.h>
+#include <errno.h>
 
 #define _NS_TYPE_ALL 0
 #define READLINK(ns,fd,ret,path,dest,len) ret = readlink((path),(dest),(len));\
-                                    dest[ret] = '\0';\
-                                    (ns).fd = getNamespaceId(dest);
+                                    if(ret>0){dest[ret] = '\0';(ns).fd = getNamespaceId(dest);}
 
 #define READLINK_FROM(path,pid,buf,ns,fd,ret,dest,len) sprintf((buf), (path), (pid));\
                                     READLINK(ns,fd,ret,buf,dest,len);
@@ -28,6 +29,7 @@ struct namespace {
     unsigned long pid;
     unsigned long uts;
     unsigned long net;
+    unsigned long usr;
     struct namespace *next_ns;
     struct process *proc_list;
     int cid;
@@ -76,7 +78,7 @@ void freeContainer(struct namespace *);
 /***
  * set namespace of the calling thread
  */
-void setNs(const char *ns, const long pid);
+int setNs(const char *ns, const long pid, int nstype);
 
 static int cid = 1;   // container id counter
 
@@ -87,6 +89,9 @@ int main() {
         printf("The program must run as root!\n");
         return 1;
     }
+
+    // init
+    setbuf(stdout, NULL);
 
 PARSE_CONTAINERS:
     printf("parsing namespaces...\n");
@@ -135,6 +140,7 @@ PARSE_CONTAINERS:
                     READLINK_FROM("/proc/%s/ns/pid",dname,path,*tmp_ns,pid,ret,buf,32);
                     READLINK_FROM("/proc/%s/ns/uts",dname,path,*tmp_ns,uts,ret,buf,32);
                     READLINK_FROM("/proc/%s/ns/net",dname,path,*tmp_ns,net,ret,buf,32);
+		    // READLING_FROM("/proc/%s/ns/usr",dname,path,*tmp_ns,usr,ret,buf,32);
 
                     struct namespace *cmp_ns = &root_namespace;
                     while((cmp_ns->pid != tmp_ns->pid) ||
@@ -175,12 +181,20 @@ PARSE_CONTAINERS:
     
     while(1) {
         printf("Type 'ent <cid>' to enter a container, or type help for more options\n");
-        scanf("%s", buf);
+        printf(">>");
+	char c;
+	int i = 0;
+	while((c = getchar()) != '\n'&& c != EOF && i < 31) {
+	    buf[i] = c;
+	    i ++;
+	}
+	buf[i] = '\0';
+
         if(strcmp(buf, "help") == 0) {
-            printf("ent--enter a specific container\n");
-            printf("list--list all containers found\n");
-            printf("ref--refresh current container list\n");
-            printf("exit--to exit\n");
+            printf("%6s  enter a specific container\n", "ent");
+            printf("%6s  list all containers found\n", "list");
+            printf("%6s  refresh current container list\n", "ref");
+            printf("%6s  to exit\n", "exit");
         } else if(strcmp(buf, "list") == 0) {
             listContainers(&root_namespace);
         } else if(strcmp(buf, "ref") == 0) {
@@ -197,10 +211,11 @@ PARSE_CONTAINERS:
         } else if(strcmp("exit", buf) == 0) {
             printf("bye\n");
             return 0;
-        } else if(strstr(buf, "ent") == 0){
+        } else if(strstr(buf, "ent") != NULL){
             // should be a number for container id
-            while(*buf <'0' || *buf > '9') buf++;
-            int id = atoi(buf);
+            int i = 0;
+            while(buf[i] <'0' || buf[i] > '9') i++;
+            int id = atoi((char *)buf + i);
             if(id == 1) {
                 printf("You cannot choose the default container!\n");
             } else {
@@ -215,34 +230,50 @@ PARSE_CONTAINERS:
                 }
                 if(found) {
                     printf("entering container %d\n", p->cid);
-                    break;
+		    
+		    pid_t fpid = fork();
+    		    if(fpid < 0) {
+			perror("fork");
+    			// printf("error creating shell process");
+    		    } else if(fpid == 0) {
+			
+			printf("in child process\n");
+	
+			// in child process
+ 		 	// setNs("ipc", p->proc_list->pid);
+			if(//setNs("mnt", p->proc_list->pid, CLONE_NEWNS) == 0 &&
+                           setNs("pid", p->proc_list->pid, CLONE_NEWPID) == 0 &&
+                           setNs("net", p->proc_list->pid, CLONE_NEWNET) == 0 && 
+                           setNs("uts", p->proc_list->pid, CLONE_NEWUTS) == 0 &&
+                           setNs("mnt", p->proc_list->pid, CLONE_NEWNS) == 0) { 
+			    printf("entered target namespace.\n");
+			    printf(">>");
+		   	    execl("/bin/bash", "", (char *) NULL);	
+			} else {
+			    printf("failed to enter namespace\n");
+			    switch(errno) {
+				case EBADF: printf("invalid file descriptor\n");break;
+				case EINVAL: printf("fd and type not match\n");break;
+				default: printf("errno: %d\n", errno);
+			    }	
+			}
+		    } else {
+		    	printf("in parent process\n");
+		    	wait(); // wait for child to terminate
+		    	printf("child exit\n");
+		    }
+		  
                 } else {
                     printf("no matching container with specified id found!\n");
                 }
             }
-        } else {
+        } else if(strlen(buf) == 0) {
+	    printf(">>");
+	}
+	else {
             printf("unknown command '%s'\n", buf);
         }
     }
-
-    // clone a process and set to the chosen namespace
-    pid_t cpid = fork();
-    if(fpid < 0) {
-    	printf("error creating shell process");
-    } else if(fpid == 0) {
-        // in child process
- 	setNs("ipc", p->proc_list->pid);
-	setNs("mnt", p->proc_list->pid);
-	setNs("pid", p->proc_list->pid);
-	setNs("net", p->proc_list->pid);
-	setNs("uts", p->proc_list->pid);
-	
-        // TODO start shell and play with some commands
-			
-    } else {
-        // in parent process
-    }
-
     // now do whatever is possible in a shell!
     
     return 0;
@@ -329,11 +360,15 @@ void freeContainer(struct namespace *ns) {
     free(ns);
 }
 
-void setNs(const char *ns, const long pid) {
+int setNs(const char *ns, const long pid, int nstype) {
     char path[32];
     sprintf(path, "/proc/%ld/ns/%s", pid, ns);
+    printf("setting namespace to %s\n", path);
     int fd = open(path, O_RDONLY);
-    setns(fd, 0);
+    if(fd <= 0) {
+	perror("open");
+    }
+    int ret = setns(fd, nstype);
     close(fd);
-    free(path);
+    return ret;
 }
