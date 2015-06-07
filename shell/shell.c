@@ -11,6 +11,8 @@
 #include <sys/time.h>
 #include <errno.h>
 
+#include "util.h"
+
 #define _NS_TYPE_ALL 0
 #define READLINK(ns,fd,ret,path,dest,len) ret = readlink((path),(dest),(len));\
                                     if(ret>0){dest[ret] = '\0';(ns).fd = getNamespaceId(dest);}
@@ -48,6 +50,11 @@ unsigned long getNamespaceId(const char *);
  * print a container info
  */
 void printContainer(const struct namespace*, const enum NAMESPACE_TYPE);
+
+/***
+ * print detailed container info
+ */
+void printContainerInfo(const struct namespace *);
 
 /***
  * print field in a namespace struct
@@ -192,11 +199,23 @@ PARSE_CONTAINERS:
 
         if(strcmp(buf, "help") == 0) {
             printf("%6s  enter a specific container\n", "ent");
+            printf("%6s  show detailed information of a container\n", "info");
             printf("%6s  list all containers found\n", "list");
             printf("%6s  refresh current container list\n", "ref");
             printf("%6s  to exit\n", "exit");
         } else if(strcmp(buf, "list") == 0) {
             listContainers(&root_namespace);
+        } else if(strstr(buf, "info") != NULL) {
+            int id = nextInt(buf);
+            if(id > 0) {
+                struct namespace *p = &root_namespace;
+                SEARCH_LIST(p, cid, id, next_ns);
+                if(p != NULL) {
+                    printContainerInfo(p);
+                    continue;
+                }
+            }
+            printf("invalid container id: %d\n", id);
         } else if(strcmp(buf, "ref") == 0) {
             // clear stuff first
             struct namespace *ns  = &root_namespace;
@@ -213,22 +232,13 @@ PARSE_CONTAINERS:
             return 0;
         } else if(strstr(buf, "ent") != NULL){
             // should be a number for container id
-            int i = 0;
-            while(buf[i] <'0' || buf[i] > '9') i++;
-            int id = atoi((char *)buf + i);
+            int id = nextInt(buf);
             if(id == 1) {
                 printf("You cannot choose the default container!\n");
             } else {
-                int found = 0;
                 struct namespace *p = root_namespace.next_ns;
-                while(p != NULL) {
-                    if(p->cid == id) {
-                        found = 1;
-                        break;
-                    }
-                    p = p->next_ns;
-                }
-                if(found) {
+                SEARCH_LIST(p,cid,id,next_ns);
+                if(p != NULL) {
                     printf("entering container %d\n", p->cid);
 		    
 		    pid_t fpid = fork();
@@ -302,13 +312,28 @@ void printContainer(const struct namespace* ns, const enum NAMESPACE_TYPE type) 
             printf("|   Container Type: CUSTOM    |\n");
             break;
     }
-    printf("|   pid ns: %14ld    |\n", ns->pid);
-    printf("|   mnt ns: %14ld    |\n", ns->mnt);
     printf("|   ipc ns: %14ld    |\n", ns->ipc);
-    printf("|   uts ns: %14ld    |\n", ns->uts);
+    printf("|   mnt ns: %14ld    |\n", ns->mnt);
     printf("|   net ns: %14ld    |\n", ns->net);
+    printf("|   pid ns: %14ld    |\n", ns->pid);
+    printf("|   uts ns: %14ld    |\n", ns->uts);
     printf("|   num processes: %7d    |\n", countProcesses(ns));
     printf("-------------------------------\n\n");
+}
+
+void printContainerInfo(const struct namespace *ns) {
+    printf("Container ID: %3d\n", ns->cid);
+    printf("ipc ns: %14ld\n", ns->ipc);
+    printf("mnt ns: %14ld\n", ns->mnt);
+    printf("net ns: %14ld\n", ns->net);
+    printf("pid ns: %14ld\n", ns->pid);
+    printf("uts ns: %14ld\n", ns->uts);
+    printf("num processes: %7d\n", countProcesses(ns));
+    struct process *p = ns->proc_list;
+    while(p->next_proc != NULL) {
+        p = p->next_proc;
+    }
+    printf("root process id: %d\n", p->pid);
 }
 
 int countProcesses(const struct namespace *ns) {

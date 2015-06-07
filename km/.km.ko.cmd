@@ -1,0 +1,1 @@
+cmd_/home/lvxiang/workspace/cash/km/km.ko := ld -r -m elf_x86_64 -T /usr/src/linux-headers-3.11.0-19-generic/scripts/module-common.lds --build-id  -o /home/lvxiang/workspace/cash/km/km.ko /home/lvxiang/workspace/cash/km/km.o /home/lvxiang/workspace/cash/km/km.mod.o
