@@ -11,5 +11,5 @@ clean:
 
 # kbuild config
 obj-m += km.o
-km-y  := channel.o
+# km-y  := channel.o
 
